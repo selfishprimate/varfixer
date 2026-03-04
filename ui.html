@@ -15,6 +15,11 @@
       color: #333;
       padding: 12px;
       background: #fff;
+      transition: padding-bottom 0.3s ease;
+    }
+
+    body.has-fix-button {
+      padding-bottom: 70px;
     }
 
     h1 {
@@ -92,7 +97,7 @@
       background: #F5F5F5;
       border-radius: 6px;
       margin-bottom: 12px;
-      font-size: 11px;
+      font-size: 12px;
       color: #666;
     }
 
@@ -115,28 +120,32 @@
       display: flex;
       justify-content: space-between;
       margin-bottom: 4px;
-      font-size: 11px;
+      font-size: 12px;
       color: #666;
     }
 
     .progress-bar {
-      height: 6px;
+      height: 8px;
       background: #E5E5E5;
-      border-radius: 3px;
+      border-radius: 4px;
       overflow: hidden;
     }
 
     .progress-fill {
       height: 100%;
       background: #0D99FF;
-      border-radius: 3px;
-      transition: width 0.2s ease;
+      border-radius: 4px;
+      transition: width 0.2s ease, background 0.2s ease;
       width: 0%;
+    }
+
+    .progress-fill.success {
+      background: #14AE5C;
     }
 
     .progress-message {
       margin-top: 4px;
-      font-size: 10px;
+      font-size: 11px;
       color: #999;
       white-space: nowrap;
       overflow: hidden;
@@ -185,13 +194,13 @@
 
     .result-field {
       color: #666;
-      font-size: 11px;
+      font-size: 12px;
     }
 
     .result-status {
       padding: 2px 8px;
       border-radius: 10px;
-      font-size: 10px;
+      font-size: 11px;
       font-weight: 500;
       flex-shrink: 0;
       margin-left: 8px;
@@ -227,7 +236,7 @@
       display: flex;
       gap: 16px;
       margin-bottom: 12px;
-      font-size: 11px;
+      font-size: 12px;
       color: #666;
     }
 
@@ -240,6 +249,33 @@
     .stat-value {
       font-weight: 600;
       color: #333;
+    }
+
+    .fix-container {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 12px;
+      background: linear-gradient(to top, rgba(255,255,255,1) 80%, rgba(255,255,255,0));
+      transform: translateY(100%);
+      opacity: 0;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      pointer-events: none;
+    }
+
+    .fix-container.visible {
+      transform: translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .fix-container button {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
     }
   </style>
 </head>
@@ -279,8 +315,8 @@
     <div id="results-list"></div>
   </div>
 
-  <div id="fix-container" style="display: none; margin-top: 12px;">
-    <button id="fix-btn" class="btn-success" style="width: 100%;">Fix All</button>
+  <div id="fix-container" class="fix-container">
+    <button id="fix-btn" class="btn-success">Connect All</button>
   </div>
 
   <script>
@@ -303,6 +339,7 @@
     const progressMessage = document.getElementById('progress-message');
 
     let currentResults = [];
+    let isFixing = false;
 
     scanBtn.onclick = () => {
       parent.postMessage({ pluginMessage: { type: 'scan' } }, '*');
@@ -343,6 +380,7 @@
 
     function hideProgress() {
       progressContainer.style.display = 'none';
+      progressFill.classList.remove('success');
     }
 
     function updateStats(data) {
@@ -357,8 +395,10 @@
       noMatchCount.textContent = noMatch;
       statsDiv.style.display = 'flex';
 
-      // Enable fix button if there are broken or remote references
-      fixBtn.disabled = (broken === 0 && remote === 0);
+      // Enable fix button if there are broken or remote references (but not during fix)
+      if (!isFixing) {
+        fixBtn.disabled = (broken === 0 && remote === 0);
+      }
     }
 
     function renderResults(data) {
@@ -425,12 +465,14 @@
           fixedCount.textContent = '0';
           noMatchCount.textContent = '0';
           statusBar.style.display = 'none';
-          fixContainer.style.display = 'none';
-          // Show progress bar immediately
+          fixContainer.classList.remove('visible');
+          document.body.classList.remove('has-fix-button');
+          // Show progress bar immediately (blue for scan)
           progressContainer.style.display = 'block';
           progressLabel.textContent = 'Preparing...';
           progressPercent.textContent = '';
           progressFill.style.width = '0%';
+          progressFill.classList.remove('success');
           progressMessage.textContent = msg.message || '';
           break;
 
@@ -455,12 +497,17 @@
 
         case 'fix-start':
           // Fix started - show progress bar immediately
+          isFixing = true;
           progressContainer.style.display = 'block';
           statusBar.style.display = 'none';
           progressLabel.textContent = msg.total + ' references to fix';
           progressPercent.textContent = '0%';
           progressFill.style.width = '0%';
+          progressFill.classList.add('success');
           progressMessage.textContent = msg.message || 'Preparing...';
+          // Update button text to show connecting
+          fixBtn.textContent = 'Connecting...';
+          fixBtn.disabled = true;
           break;
 
         case 'fix-item':
@@ -487,23 +534,28 @@
         case 'scan-result':
           hideProgress();
           setButtonsDisabled(false);
-          const remoteRefs = msg.data.filter(r => r.status === 'remote').length;
-          const brokenRefs = msg.data.filter(r => r.status === 'broken').length;
+          // Use currentResults if msg.data is empty (streaming already populated it)
+          const scanData = (msg.data && msg.data.length > 0) ? msg.data : currentResults;
+          const remoteRefs = scanData.filter(r => r.status === 'remote').length;
+          const brokenRefs = scanData.filter(r => r.status === 'broken').length;
           const totalIssues = remoteRefs + brokenRefs;
+          console.log('scan-result: totalIssues=' + totalIssues + ', remote=' + remoteRefs + ', broken=' + brokenRefs);
           let statusMsg = `Scan complete. ${msg.localVariableCount} local variables found. `;
           if (totalIssues === 0) {
             statusMsg += 'No issues found.';
-            fixContainer.style.display = 'none';
+            fixContainer.classList.remove('visible');
+            document.body.classList.remove('has-fix-button');
           } else {
             if (remoteRefs > 0) statusMsg += `${remoteRefs} remote`;
             if (remoteRefs > 0 && brokenRefs > 0) statusMsg += ', ';
             if (brokenRefs > 0) statusMsg += `${brokenRefs} broken`;
             statusMsg += ' references found.';
-            // Show fix button
-            fixContainer.style.display = 'block';
+            // Show fix button with animation
+            fixContainer.classList.add('visible');
+            document.body.classList.add('has-fix-button');
           }
           showStatus(statusMsg, totalIssues > 0 ? 'error' : 'success');
-          renderResults(msg.data);
+          renderResults(scanData);
 
           // Debug: Log collection samples
           if (msg.collectionSamples) {
@@ -536,17 +588,28 @@
           break;
 
         case 'fix-result':
+          isFixing = false;
           hideProgress();
           setButtonsDisabled(false);
+          // Restore button text
+          fixBtn.textContent = 'Connect All';
           showStatus(`Fix complete. ${msg.fixedCount} fixed, ${msg.failedCount} unmatched.`, msg.failedCount > 0 ? 'error' : 'success');
           renderResults(msg.data);
           // Show button if there are remaining issues, hide otherwise
           const remainingIssues = msg.data.filter(r => r.status === 'remote' || r.status === 'broken').length;
-          fixContainer.style.display = remainingIssues > 0 ? 'block' : 'none';
+          if (remainingIssues > 0) {
+            fixContainer.classList.add('visible');
+            document.body.classList.add('has-fix-button');
+          } else {
+            fixContainer.classList.remove('visible');
+            document.body.classList.remove('has-fix-button');
+          }
           break;
 
         case 'error':
+          isFixing = false;
           setButtonsDisabled(false);
+          fixBtn.textContent = 'Connect All';
           showStatus(msg.message, 'error');
           break;
       }

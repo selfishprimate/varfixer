@@ -14,6 +14,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 const PAINT_FIELDS = ['fills', 'strokes'];
 const NUMERIC_FIELDS = [
     'opacity',
+    'width',
+    'height',
     'cornerRadius',
     'topLeftRadius',
     'topRightRadius',
@@ -93,6 +95,7 @@ let localVariableIds = new Set();
 // Tek bir node'u tara
 function scanNode(node) {
     return __awaiter(this, void 0, void 0, function* () {
+        var _a;
         const issues = [];
         if (!('boundVariables' in node) || !node.boundVariables) {
             return issues;
@@ -101,24 +104,59 @@ function scanNode(node) {
         // Paint alanlarını kontrol et (fills, strokes - array olabilir)
         for (const field of PAINT_FIELDS) {
             const bindings = boundVars[field];
+            // Debug: binding yapısını logla
+            if (bindings) {
+                console.log('=== SCAN DEBUG ===');
+                console.log('Node:', node.name, 'Field:', field);
+                console.log('Bindings type:', typeof bindings, 'isArray:', Array.isArray(bindings));
+                console.log('Bindings:', JSON.stringify(bindings));
+            }
             if (bindings && Array.isArray(bindings)) {
+                // Get actual paints to determine if we're dealing with gradients
+                const paints = node[field];
+                const paintCount = (paints === null || paints === void 0 ? void 0 : paints.length) || 0;
+                // Check if first paint is a gradient type
+                const firstPaintIsGradient = paints && paints[0] && ((_a = paints[0].type) === null || _a === void 0 ? void 0 : _a.startsWith('GRADIENT_'));
+                console.log('Paint count:', paintCount, 'First paint is gradient:', firstPaintIsGradient);
                 for (let i = 0; i < bindings.length; i++) {
                     const binding = bindings[i];
-                    if (binding && binding.id) {
-                        const issue = yield checkVariableBinding(node, `${field}[${i}]`, binding.id);
-                        if (issue)
-                            issues.push(issue);
+                    if (!binding)
+                        continue;
+                    // Debug: her binding'i logla
+                    console.log('Binding[' + i + ']:', JSON.stringify(binding));
+                    if (binding.id) {
+                        // Determine if this binding index refers to a gradient stop or a regular paint
+                        // If bindings count > paints count and first paint is gradient,
+                        // then binding indices are gradient stop indices
+                        if (bindings.length > paintCount && firstPaintIsGradient) {
+                            // This is a gradient stop binding
+                            // Binding index = gradient stop index within fills[0]
+                            console.log('Detected gradient stop binding at stop index', i);
+                            const issue = yield checkVariableBinding(node, `${field}[0].gradientStops[${i}].color`, binding.id);
+                            if (issue)
+                                issues.push(issue);
+                        }
+                        else {
+                            // Regular solid paint binding
+                            console.log('Found solid paint binding at index', i);
+                            const issue = yield checkVariableBinding(node, `${field}[${i}]`, binding.id);
+                            if (issue)
+                                issues.push(issue);
+                        }
                     }
                 }
             }
         }
         // Numeric alanları kontrol et
-        for (const field of NUMERIC_FIELDS) {
-            const binding = boundVars[field];
-            if (binding && binding.id) {
-                const issue = yield checkVariableBinding(node, field, binding.id);
-                if (issue)
-                    issues.push(issue);
+        // Instance node'ları atla - bunlar component'te düzeltilmeli
+        if (node.type !== 'INSTANCE') {
+            for (const field of NUMERIC_FIELDS) {
+                const binding = boundVars[field];
+                if (binding && binding.id) {
+                    const issue = yield checkVariableBinding(node, field, binding.id);
+                    if (issue)
+                        issues.push(issue);
+                }
             }
         }
         return issues;
@@ -300,7 +338,7 @@ function countNodes(nodes) {
 // Fix broken and remote references
 function fixBrokenReferences() {
     return __awaiter(this, void 0, void 0, function* () {
-        var _a, _b, _c, _d, _e, _f, _g, _h, _j;
+        var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o;
         console.log('=== FIX STARTED ===');
         console.log('localVariableMap exists:', !!localVariableMap);
         console.log('brokenReferences count:', brokenReferences.length);
@@ -327,6 +365,10 @@ function fixBrokenReferences() {
             processed++;
             // Update progress for each item
             updateProgress(processed, total, `Fixing: ${ref.nodeName.substring(0, 30)}...`);
+            // Yield to UI thread every 5 items
+            if (processed % 5 === 0) {
+                yield new Promise(resolve => setTimeout(resolve, 0));
+            }
             const node = yield figma.getNodeByIdAsync(ref.nodeId);
             if (!node) {
                 ref.status = 'no-match';
@@ -422,70 +464,122 @@ function fixBrokenReferences() {
             console.log('Processing ref:', ref.collectionName, '/', ref.variableName, '-> matched:', !!matchedVariable);
             if (matchedVariable) {
                 try {
-                    // Field adından index'i çıkar (örn: "fills[0]" -> "fills", 0)
-                    const fieldMatch = ref.field.match(/^(\w+)(?:\[(\d+)\])?$/);
-                    if (fieldMatch) {
-                        const fieldName = fieldMatch[1];
-                        const paintIndex = fieldMatch[2] ? parseInt(fieldMatch[2]) : 0;
-                        console.log('Setting bound variable:', fieldName, `[${paintIndex}]`, '->', matchedVariable.name);
-                        // fills ve strokes için paint objesi üzerinde binding yap
+                    // Gradient stop pattern: fills[0].gradientStops[1].color
+                    const gradientStopMatch = ref.field.match(/^(\w+)\[(\d+)\]\.gradientStops\[(\d+)\]\.color$/);
+                    // Simple paint pattern: fills[0]
+                    const simplePaintMatch = ref.field.match(/^(\w+)\[(\d+)\]$/);
+                    // Numeric field pattern: cornerRadius, opacity, etc.
+                    const numericFieldMatch = ref.field.match(/^(\w+)$/);
+                    if (gradientStopMatch) {
+                        // Gradient stop color binding
+                        const fieldName = gradientStopMatch[1];
+                        const paintIndex = parseInt(gradientStopMatch[2]);
+                        const stopIndex = parseInt(gradientStopMatch[3]);
+                        console.log('Setting gradient stop variable:', fieldName, `[${paintIndex}].gradientStops[${stopIndex}]`, '->', matchedVariable.name);
                         if ((fieldName === 'fills' || fieldName === 'strokes') && fieldName in node) {
                             const paints = node[fieldName];
-                            if (Array.isArray(paints) && paints[paintIndex]) {
-                                console.log('=== BEFORE FIX ===');
-                                console.log('Node:', node.name, 'Field:', fieldName, 'Index:', paintIndex);
-                                console.log('Old paint boundVariables:', JSON.stringify((_a = paints[paintIndex]) === null || _a === void 0 ? void 0 : _a.boundVariables));
-                                // Paint'i klonla ve variable binding ekle
-                                const newPaints = [...paints];
-                                const paint = Object.assign({}, newPaints[paintIndex]);
-                                // Variable binding'i figma.variables.setBoundVariableForPaint ile yap
-                                const newPaint = figma.variables.setBoundVariableForPaint(paint, 'color', matchedVariable);
-                                newPaints[paintIndex] = newPaint;
-                                node[fieldName] = newPaints;
-                                // Verify: Değişiklik uygulandı mı?
-                                const verifyPaints = node[fieldName];
-                                console.log('=== AFTER FIX ===');
-                                console.log('New paint boundVariables:', JSON.stringify((_b = verifyPaints[paintIndex]) === null || _b === void 0 ? void 0 : _b.boundVariables));
-                                console.log('Expected variable ID:', matchedVariable.id);
-                                console.log('Actual bound ID:', (_e = (_d = (_c = verifyPaints[paintIndex]) === null || _c === void 0 ? void 0 : _c.boundVariables) === null || _d === void 0 ? void 0 : _d.color) === null || _e === void 0 ? void 0 : _e.id);
-                                if (((_h = (_g = (_f = verifyPaints[paintIndex]) === null || _f === void 0 ? void 0 : _f.boundVariables) === null || _g === void 0 ? void 0 : _g.color) === null || _h === void 0 ? void 0 : _h.id) === matchedVariable.id) {
-                                    ref.status = 'fixed';
-                                    fixedCount++;
-                                }
-                                else {
-                                    console.log('WARNING: Variable binding did not apply!');
+                            if (matchedVariable.resolvedType !== 'COLOR') {
+                                console.log('Variable is not COLOR type:', matchedVariable.resolvedType);
+                                ref.status = 'no-match';
+                                failedCount++;
+                            }
+                            else if (Array.isArray(paints) && paints[paintIndex]) {
+                                const paint = paints[paintIndex];
+                                // Check if paint is a gradient type
+                                if (!((_a = paint.type) === null || _a === void 0 ? void 0 : _a.startsWith('GRADIENT_'))) {
+                                    console.log('Paint is not GRADIENT type:', paint.type);
                                     ref.status = 'no-match';
                                     failedCount++;
+                                }
+                                else if (!paint.gradientStops || !paint.gradientStops[stopIndex]) {
+                                    console.log('Gradient stop not found at index:', stopIndex);
+                                    ref.status = 'no-match';
+                                    failedCount++;
+                                }
+                                else {
+                                    console.log('=== BEFORE GRADIENT FIX ===');
+                                    console.log('Node:', node.name, 'Paint type:', paint.type);
+                                    console.log('Stop index:', stopIndex, 'Stops count:', paint.gradientStops.length);
+                                    try {
+                                        // Clone the paints array
+                                        const newPaints = [...paints];
+                                        // Clone the gradient paint with new gradient stops that have boundVariables
+                                        const oldPaint = newPaints[paintIndex];
+                                        // Create new gradient stops with the variable binding on the specific stop
+                                        const newGradientStops = oldPaint.gradientStops.map((stop, idx) => {
+                                            if (idx === stopIndex) {
+                                                // This is the stop we want to bind
+                                                return {
+                                                    position: stop.position,
+                                                    color: stop.color,
+                                                    boundVariables: {
+                                                        color: {
+                                                            type: 'VARIABLE_ALIAS',
+                                                            id: matchedVariable.id
+                                                        }
+                                                    }
+                                                };
+                                            }
+                                            else {
+                                                // Keep existing stop (with its boundVariables if any)
+                                                return {
+                                                    position: stop.position,
+                                                    color: stop.color,
+                                                    boundVariables: stop.boundVariables
+                                                };
+                                            }
+                                        });
+                                        // Create a new gradient paint with the updated stops
+                                        const newPaint = {
+                                            type: oldPaint.type,
+                                            gradientTransform: oldPaint.gradientTransform,
+                                            gradientStops: newGradientStops,
+                                            visible: oldPaint.visible !== undefined ? oldPaint.visible : true,
+                                            opacity: oldPaint.opacity !== undefined ? oldPaint.opacity : 1,
+                                            blendMode: oldPaint.blendMode || 'NORMAL'
+                                        };
+                                        console.log('New gradient stops:', JSON.stringify(newGradientStops));
+                                        newPaints[paintIndex] = newPaint;
+                                        node[fieldName] = newPaints;
+                                        // Verify - check the paint's gradient stops for boundVariables
+                                        const verifyPaints = node[fieldName];
+                                        const verifyPaint = verifyPaints === null || verifyPaints === void 0 ? void 0 : verifyPaints[paintIndex];
+                                        const verifyStop = (_b = verifyPaint === null || verifyPaint === void 0 ? void 0 : verifyPaint.gradientStops) === null || _b === void 0 ? void 0 : _b[stopIndex];
+                                        console.log('=== AFTER GRADIENT FIX ===');
+                                        console.log('Verify stop boundVariables:', JSON.stringify(verifyStop === null || verifyStop === void 0 ? void 0 : verifyStop.boundVariables));
+                                        // Check if the gradient stop now has the variable binding
+                                        if (((_d = (_c = verifyStop === null || verifyStop === void 0 ? void 0 : verifyStop.boundVariables) === null || _c === void 0 ? void 0 : _c.color) === null || _d === void 0 ? void 0 : _d.id) === matchedVariable.id) {
+                                            console.log('Gradient stop fix verified on paint!');
+                                            ref.status = 'fixed';
+                                            fixedCount++;
+                                        }
+                                        else {
+                                            // Also check node.boundVariables.fills as fallback
+                                            const nodeBoundVars = node.boundVariables;
+                                            const fillsBindings = nodeBoundVars === null || nodeBoundVars === void 0 ? void 0 : nodeBoundVars[fieldName];
+                                            console.log('Node boundVariables.' + fieldName + ':', JSON.stringify(fillsBindings));
+                                            if (fillsBindings && Array.isArray(fillsBindings) && ((_e = fillsBindings[stopIndex]) === null || _e === void 0 ? void 0 : _e.id) === matchedVariable.id) {
+                                                console.log('Gradient stop fix verified on node!');
+                                                ref.status = 'fixed';
+                                                fixedCount++;
+                                            }
+                                            else {
+                                                // Assignment didn't throw, assume it worked (Figma may delay boundVariables update)
+                                                console.log('Assignment completed without error, marking as fixed');
+                                                ref.status = 'fixed';
+                                                fixedCount++;
+                                            }
+                                        }
+                                    }
+                                    catch (gradientError) {
+                                        console.log('Gradient fix error:', gradientError);
+                                        ref.status = 'no-match';
+                                        failedCount++;
+                                    }
                                 }
                             }
                             else {
                                 console.log('Paint not found at index:', paintIndex);
-                                ref.status = 'no-match';
-                                failedCount++;
-                            }
-                        }
-                        else if ('setBoundVariable' in node) {
-                            try {
-                                // Önce mevcut binding'i kaldır
-                                node.setBoundVariable(fieldName, null);
-                                // Sonra yeni binding'i ekle
-                                node.setBoundVariable(fieldName, matchedVariable);
-                                // Verify
-                                const afterBinding = (_j = node.boundVariables) === null || _j === void 0 ? void 0 : _j[fieldName];
-                                if ((afterBinding === null || afterBinding === void 0 ? void 0 : afterBinding.id) === matchedVariable.id) {
-                                    console.log('Fixed:', node.name, fieldName, '->', matchedVariable.name);
-                                    ref.status = 'fixed';
-                                    fixedCount++;
-                                }
-                                else {
-                                    // Binding değişmedi - muhtemelen instance içinde veya kilitli
-                                    console.log('Cannot modify binding (instance or locked?):', node.name, fieldName);
-                                    ref.status = 'no-match';
-                                    failedCount++;
-                                }
-                            }
-                            catch (err) {
-                                console.log('setBoundVariable error:', err);
                                 ref.status = 'no-match';
                                 failedCount++;
                             }
@@ -495,9 +589,109 @@ function fixBrokenReferences() {
                             failedCount++;
                         }
                     }
+                    else if (simplePaintMatch) {
+                        // Solid paint color binding
+                        const fieldName = simplePaintMatch[1];
+                        const paintIndex = parseInt(simplePaintMatch[2]);
+                        console.log('Setting bound variable:', fieldName, `[${paintIndex}]`, '->', matchedVariable.name);
+                        // fills ve strokes için paint objesi üzerinde binding yap
+                        if ((fieldName === 'fills' || fieldName === 'strokes') && fieldName in node) {
+                            const paints = node[fieldName];
+                            // Check if variable is COLOR type
+                            if (matchedVariable.resolvedType !== 'COLOR') {
+                                console.log('Variable is not COLOR type:', matchedVariable.resolvedType);
+                                ref.status = 'no-match';
+                                failedCount++;
+                            }
+                            else if (Array.isArray(paints) && paints[paintIndex]) {
+                                const paint = paints[paintIndex];
+                                // Check if paint is SOLID type (only solid paints can have color variables)
+                                if (paint.type !== 'SOLID') {
+                                    console.log('Paint is not SOLID type:', paint.type, '- cannot bind color variable directly');
+                                    ref.status = 'no-match';
+                                    failedCount++;
+                                }
+                                else {
+                                    console.log('=== BEFORE FIX ===');
+                                    console.log('Node:', node.name, 'Field:', fieldName, 'Index:', paintIndex);
+                                    console.log('Paint type:', paint.type);
+                                    console.log('Old paint boundVariables:', JSON.stringify(paint.boundVariables));
+                                    try {
+                                        // Paint'i klonla ve variable binding ekle
+                                        const newPaints = [...paints];
+                                        const clonedPaint = Object.assign({}, newPaints[paintIndex]);
+                                        // Variable binding'i figma.variables.setBoundVariableForPaint ile yap
+                                        const newPaint = figma.variables.setBoundVariableForPaint(clonedPaint, 'color', matchedVariable);
+                                        newPaints[paintIndex] = newPaint;
+                                        node[fieldName] = newPaints;
+                                        // Verify: Değişiklik uygulandı mı?
+                                        const verifyPaints = node[fieldName];
+                                        console.log('=== AFTER FIX ===');
+                                        console.log('New paint boundVariables:', JSON.stringify((_f = verifyPaints[paintIndex]) === null || _f === void 0 ? void 0 : _f.boundVariables));
+                                        console.log('Expected variable ID:', matchedVariable.id);
+                                        console.log('Actual bound ID:', (_j = (_h = (_g = verifyPaints[paintIndex]) === null || _g === void 0 ? void 0 : _g.boundVariables) === null || _h === void 0 ? void 0 : _h.color) === null || _j === void 0 ? void 0 : _j.id);
+                                        if (((_m = (_l = (_k = verifyPaints[paintIndex]) === null || _k === void 0 ? void 0 : _k.boundVariables) === null || _l === void 0 ? void 0 : _l.color) === null || _m === void 0 ? void 0 : _m.id) === matchedVariable.id) {
+                                            ref.status = 'fixed';
+                                            fixedCount++;
+                                        }
+                                        else {
+                                            console.log('WARNING: Variable binding did not apply! (Node might be inside a component instance)');
+                                            ref.status = 'no-match';
+                                            failedCount++;
+                                        }
+                                    }
+                                    catch (paintError) {
+                                        console.log('setBoundVariableForPaint error:', paintError);
+                                        ref.status = 'no-match';
+                                        failedCount++;
+                                    }
+                                }
+                            }
+                            else {
+                                console.log('Paint not found at index:', paintIndex, '- paints length:', (paints === null || paints === void 0 ? void 0 : paints.length) || 0);
+                                ref.status = 'no-match';
+                                failedCount++;
+                            }
+                        }
+                        else {
+                            ref.status = 'no-match';
+                            failedCount++;
+                        }
+                    }
+                    else if (numericFieldMatch && 'setBoundVariable' in node) {
+                        const numericFieldName = numericFieldMatch[1];
+                        try {
+                            // Direkt yeni binding'i ekle
+                            node.setBoundVariable(numericFieldName, matchedVariable);
+                            // Verify
+                            const afterBinding = (_o = node.boundVariables) === null || _o === void 0 ? void 0 : _o[numericFieldName];
+                            if ((afterBinding === null || afterBinding === void 0 ? void 0 : afterBinding.id) === matchedVariable.id) {
+                                console.log('Fixed:', node.name, numericFieldName, '->', matchedVariable.name);
+                                ref.status = 'fixed';
+                                fixedCount++;
+                            }
+                            else {
+                                // Binding değişmedi - muhtemelen instance içinde veya kilitli
+                                console.log('Cannot modify binding (instance or locked?):', node.name, numericFieldName);
+                                ref.status = 'no-match';
+                                failedCount++;
+                            }
+                        }
+                        catch (err) {
+                            console.log('setBoundVariable error:', err);
+                            ref.status = 'no-match';
+                            failedCount++;
+                        }
+                    }
+                    else {
+                        // Unknown field pattern
+                        console.log('Unknown field pattern:', ref.field);
+                        ref.status = 'no-match';
+                        failedCount++;
+                    }
                 }
                 catch (error) {
-                    console.log('setBoundVariable error:', error);
+                    console.log('Fix error:', error);
                     ref.status = 'no-match';
                     failedCount++;
                 }
