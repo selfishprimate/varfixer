@@ -107,6 +107,43 @@
       color: #116329;
     }
 
+    .progress-container {
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+      font-size: 11px;
+      color: #666;
+    }
+
+    .progress-bar {
+      height: 6px;
+      background: #E5E5E5;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: #0D99FF;
+      border-radius: 3px;
+      transition: width 0.2s ease;
+      width: 0%;
+    }
+
+    .progress-message {
+      margin-top: 4px;
+      font-size: 10px;
+      color: #999;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     .results-container {
       border: 1px solid #E5E5E5;
       border-radius: 6px;
@@ -176,6 +213,11 @@
       color: #9A6700;
     }
 
+    .status-remote {
+      background: #DDF4FF;
+      color: #0969DA;
+    }
+
     .empty-state {
       padding: 24px;
       text-align: center;
@@ -218,7 +260,19 @@
 
   <div id="status-bar" class="status-bar" style="display: none;"></div>
 
+  <div id="progress-container" class="progress-container">
+    <div class="progress-header">
+      <span id="progress-label">Taranıyor...</span>
+      <span id="progress-percent">0%</span>
+    </div>
+    <div class="progress-bar">
+      <div id="progress-fill" class="progress-fill"></div>
+    </div>
+    <div id="progress-message" class="progress-message"></div>
+  </div>
+
   <div id="stats" class="stats" style="display: none;">
+    <div class="stat">Remote: <span id="remote-count" class="stat-value">0</span></div>
     <div class="stat">Kırık: <span id="broken-count" class="stat-value">0</span></div>
     <div class="stat">Düzeltildi: <span id="fixed-count" class="stat-value">0</span></div>
     <div class="stat">Eşleşmedi: <span id="no-match-count" class="stat-value">0</span></div>
@@ -238,9 +292,15 @@
     const statsDiv = document.getElementById('stats');
     const resultsContainer = document.getElementById('results-container');
     const resultsList = document.getElementById('results-list');
+    const remoteCount = document.getElementById('remote-count');
     const brokenCount = document.getElementById('broken-count');
     const fixedCount = document.getElementById('fixed-count');
     const noMatchCount = document.getElementById('no-match-count');
+    const progressContainer = document.getElementById('progress-container');
+    const progressLabel = document.getElementById('progress-label');
+    const progressPercent = document.getElementById('progress-percent');
+    const progressFill = document.getElementById('progress-fill');
+    const progressMessage = document.getElementById('progress-message');
 
     let currentResults = [];
 
@@ -277,20 +337,36 @@
       statusBar.textContent = message;
       statusBar.className = 'status-bar' + (type !== 'info' ? ' ' + type : '');
       statusBar.style.display = 'block';
+      progressContainer.style.display = 'none';
+    }
+
+    function showProgress(current, total, percent, message) {
+      progressContainer.style.display = 'block';
+      statusBar.style.display = 'none';
+      progressLabel.textContent = current + ' / ' + total + ' node';
+      progressPercent.textContent = percent + '%';
+      progressFill.style.width = percent + '%';
+      progressMessage.textContent = message || '';
+    }
+
+    function hideProgress() {
+      progressContainer.style.display = 'none';
     }
 
     function updateStats(data) {
+      const remote = data.filter(r => r.status === 'remote').length;
       const broken = data.filter(r => r.status === 'broken').length;
       const fixed = data.filter(r => r.status === 'fixed').length;
       const noMatch = data.filter(r => r.status === 'no-match').length;
 
+      remoteCount.textContent = remote;
       brokenCount.textContent = broken;
       fixedCount.textContent = fixed;
       noMatchCount.textContent = noMatch;
       statsDiv.style.display = 'flex';
 
-      // Düzelt butonu sadece kırık referans varsa aktif
-      fixBtn.disabled = broken === 0;
+      // Düzelt butonu kırık veya remote referans varsa aktif
+      fixBtn.disabled = (broken === 0 && remote === 0);
     }
 
     function renderResults(data) {
@@ -317,6 +393,7 @@
 
     function getStatusLabel(status) {
       switch (status) {
+        case 'remote': return 'Remote';
         case 'broken': return 'Kırık';
         case 'fixed': return 'Düzeltildi';
         case 'no-match': return 'Eşleşmedi';
@@ -353,10 +430,125 @@
           showStatus(msg.message);
           break;
 
+        case 'progress':
+          showProgress(msg.current, msg.total, msg.percent, msg.message);
+          break;
+
+        case 'scan-start':
+          // Tarama başladı - listeyi temizle ve progress göster
+          currentResults = [];
+          resultsList.innerHTML = '';
+          resultsContainer.style.display = 'block';
+          statsDiv.style.display = 'flex';
+          remoteCount.textContent = '0';
+          brokenCount.textContent = '0';
+          fixedCount.textContent = '0';
+          noMatchCount.textContent = '0';
+          statusBar.style.display = 'none';
+          // Progress bar'ı hemen göster
+          progressContainer.style.display = 'block';
+          progressLabel.textContent = 'Hazırlanıyor...';
+          progressPercent.textContent = '';
+          progressFill.style.width = '0%';
+          progressMessage.textContent = msg.message || '';
+          break;
+
+        case 'scan-item':
+          // Streaming: Bulunan her item'ı anında listeye ekle
+          currentResults.push(msg.item);
+          const itemHtml = `
+            <div class="result-item" data-index="${currentResults.length - 1}">
+              <div class="result-info">
+                <div class="result-node">${escapeHtml(msg.item.nodeName)}</div>
+                <div class="result-field">${escapeHtml(msg.item.field)}${msg.item.variableName ? ' → ' + escapeHtml(msg.item.variableName) : ''}</div>
+              </div>
+              <span class="result-status status-${msg.item.status}">${getStatusLabel(msg.item.status)}</span>
+            </div>
+          `;
+          resultsList.insertAdjacentHTML('beforeend', itemHtml);
+          // Stats güncelle
+          updateStats(currentResults);
+          // Scroll to bottom
+          resultsList.scrollTop = resultsList.scrollHeight;
+          break;
+
+        case 'fix-start':
+          // Düzeltme başladı - progress bar'ı hemen göster
+          progressContainer.style.display = 'block';
+          statusBar.style.display = 'none';
+          progressLabel.textContent = msg.total + ' referans düzeltilecek';
+          progressPercent.textContent = '0%';
+          progressFill.style.width = '0%';
+          progressMessage.textContent = msg.message || 'Hazırlanıyor...';
+          break;
+
+        case 'fix-item':
+          // Streaming: Her düzeltilen item'ı güncelle
+          if (currentResults[msg.index]) {
+            currentResults[msg.index].status = msg.status;
+            const itemEl = resultsList.querySelector(`[data-index="${msg.index}"]`);
+            if (itemEl) {
+              const statusEl = itemEl.querySelector('.result-status');
+              if (statusEl) {
+                statusEl.className = 'result-status status-' + msg.status;
+                statusEl.textContent = getStatusLabel(msg.status);
+              }
+              // Düzeltildi ise görünür alana scroll et
+              if (msg.status === 'fixed') {
+                itemEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              }
+            }
+          }
+          // Stats güncelle
+          updateStats(currentResults);
+          break;
+
         case 'scan-result':
+          hideProgress();
           setButtonsDisabled(false);
-          showStatus(`Tarama tamamlandı. ${msg.data.length} kırık referans bulundu.`, msg.data.length > 0 ? 'error' : 'success');
+          const remoteRefs = msg.data.filter(r => r.status === 'remote').length;
+          const brokenRefs = msg.data.filter(r => r.status === 'broken').length;
+          const totalIssues = remoteRefs + brokenRefs;
+          let statusMsg = `Tarama tamamlandı. ${msg.localVariableCount} local variable bulundu. `;
+          if (totalIssues === 0) {
+            statusMsg += 'Sorun bulunamadı.';
+          } else {
+            if (remoteRefs > 0) statusMsg += `${remoteRefs} remote`;
+            if (remoteRefs > 0 && brokenRefs > 0) statusMsg += ', ';
+            if (brokenRefs > 0) statusMsg += `${brokenRefs} kırık`;
+            statusMsg += ' referans bulundu.';
+          }
+          showStatus(statusMsg, totalIssues > 0 ? 'error' : 'success');
           renderResults(msg.data);
+
+          // Debug: Collection bazlı variable örneklerini konsola yaz
+          if (msg.collectionSamples) {
+            console.log('=== LOCAL COLLECTIONS ===');
+            Object.keys(msg.collectionSamples).forEach(function(col) {
+              console.log('Collection: ' + col + ' (' + msg.collectionSamples[col].length + ' örnek)');
+              msg.collectionSamples[col].forEach(function(v) { console.log('  ' + v); });
+            });
+          }
+          // Debug: Eşleşmeyen referansların detaylı bilgisini konsola yaz
+          const noMatchRefs = msg.data.filter(r => r.status === 'remote' || r.status === 'broken' || r.status === 'no-match');
+          if (noMatchRefs.length > 0) {
+            console.log('=== ARANAN VARIABLE DETAYLARI ===');
+            const uniqueRefs = {};
+            noMatchRefs.forEach(function(r) {
+              const key = (r.collectionName || '?') + '/' + (r.variableName || '?');
+              if (!uniqueRefs[key]) {
+                uniqueRefs[key] = {
+                  collectionName: r.collectionName,
+                  variableName: r.variableName,
+                  status: r.status,
+                  fullPath: key
+                };
+              }
+            });
+            Object.values(uniqueRefs).forEach(function(r) {
+              console.log('Status:', r.status, '| Collection:', r.collectionName, '| Variable:', r.variableName, '| FullPath:', r.fullPath);
+            });
+          }
           break;
 
         case 'fix-result':
