@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 12px;
+      color: #333;
+      padding: 12px;
+      background: #fff;
+    }
+
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #000;
+    }
+
+    .button-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      flex: 1;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: #0D99FF;
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: #0B85E0;
+    }
+
+    .btn-secondary {
+      background: #E5E5E5;
+      color: #333;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: #D5D5D5;
+    }
+
+    .btn-success {
+      background: #14AE5C;
+      color: #fff;
+    }
+
+    .btn-success:hover:not(:disabled) {
+      background: #0F9B4F;
+    }
+
+    .btn-export {
+      background: #7B61FF;
+      color: #fff;
+    }
+
+    .btn-export:hover:not(:disabled) {
+      background: #6B4FE0;
+    }
+
+    .status-bar {
+      padding: 8px 12px;
+      background: #F5F5F5;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      font-size: 11px;
+      color: #666;
+    }
+
+    .status-bar.error {
+      background: #FFEBE9;
+      color: #CF222E;
+    }
+
+    .status-bar.success {
+      background: #DDF4E4;
+      color: #116329;
+    }
+
+    .results-container {
+      border: 1px solid #E5E5E5;
+      border-radius: 6px;
+      max-height: 280px;
+      overflow-y: auto;
+    }
+
+    .results-header {
+      padding: 8px 12px;
+      background: #F5F5F5;
+      border-bottom: 1px solid #E5E5E5;
+      font-weight: 600;
+      position: sticky;
+      top: 0;
+    }
+
+    .result-item {
+      padding: 8px 12px;
+      border-bottom: 1px solid #F0F0F0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .result-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .result-node {
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .result-field {
+      color: #666;
+      font-size: 11px;
+    }
+
+    .result-status {
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+      flex-shrink: 0;
+      margin-left: 8px;
+    }
+
+    .status-broken {
+      background: #FFEBE9;
+      color: #CF222E;
+    }
+
+    .status-fixed {
+      background: #DDF4E4;
+      color: #116329;
+    }
+
+    .status-no-match {
+      background: #FFF8C5;
+      color: #9A6700;
+    }
+
+    .empty-state {
+      padding: 24px;
+      text-align: center;
+      color: #999;
+    }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 12px;
+      font-size: 11px;
+      color: #666;
+    }
+
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: #333;
+    }
+  </style>
+</head>
+<body>
+  <h1>VarFixer</h1>
+
+  <div class="button-group">
+    <div class="button-row">
+      <button id="scan-btn" class="btn-primary">Sayfayı Tara</button>
+      <button id="scan-all-btn" class="btn-secondary">Tüm Sayfaları Tara</button>
+    </div>
+    <div class="button-row">
+      <button id="fix-btn" class="btn-success" disabled>Düzelt</button>
+      <button id="export-btn" class="btn-export">Token'ları Export Et</button>
+    </div>
+  </div>
+
+  <div id="status-bar" class="status-bar" style="display: none;"></div>
+
+  <div id="stats" class="stats" style="display: none;">
+    <div class="stat">Kırık: <span id="broken-count" class="stat-value">0</span></div>
+    <div class="stat">Düzeltildi: <span id="fixed-count" class="stat-value">0</span></div>
+    <div class="stat">Eşleşmedi: <span id="no-match-count" class="stat-value">0</span></div>
+  </div>
+
+  <div id="results-container" class="results-container" style="display: none;">
+    <div class="results-header">Sonuçlar</div>
+    <div id="results-list"></div>
+  </div>
+
+  <script>
+    const scanBtn = document.getElementById('scan-btn');
+    const scanAllBtn = document.getElementById('scan-all-btn');
+    const fixBtn = document.getElementById('fix-btn');
+    const exportBtn = document.getElementById('export-btn');
+    const statusBar = document.getElementById('status-bar');
+    const statsDiv = document.getElementById('stats');
+    const resultsContainer = document.getElementById('results-container');
+    const resultsList = document.getElementById('results-list');
+    const brokenCount = document.getElementById('broken-count');
+    const fixedCount = document.getElementById('fixed-count');
+    const noMatchCount = document.getElementById('no-match-count');
+
+    let currentResults = [];
+
+    scanBtn.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'scan' } }, '*');
+      setButtonsDisabled(true);
+    };
+
+    scanAllBtn.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'scan-all-pages' } }, '*');
+      setButtonsDisabled(true);
+    };
+
+    fixBtn.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'fix' } }, '*');
+      setButtonsDisabled(true);
+    };
+
+    exportBtn.onclick = () => {
+      parent.postMessage({ pluginMessage: { type: 'export-tokens' } }, '*');
+      setButtonsDisabled(true);
+    };
+
+    function setButtonsDisabled(disabled) {
+      scanBtn.disabled = disabled;
+      scanAllBtn.disabled = disabled;
+      exportBtn.disabled = disabled;
+      if (disabled) {
+        fixBtn.disabled = true;
+      }
+    }
+
+    function showStatus(message, type = 'info') {
+      statusBar.textContent = message;
+      statusBar.className = 'status-bar' + (type !== 'info' ? ' ' + type : '');
+      statusBar.style.display = 'block';
+    }
+
+    function updateStats(data) {
+      const broken = data.filter(r => r.status === 'broken').length;
+      const fixed = data.filter(r => r.status === 'fixed').length;
+      const noMatch = data.filter(r => r.status === 'no-match').length;
+
+      brokenCount.textContent = broken;
+      fixedCount.textContent = fixed;
+      noMatchCount.textContent = noMatch;
+      statsDiv.style.display = 'flex';
+
+      // Düzelt butonu sadece kırık referans varsa aktif
+      fixBtn.disabled = broken === 0;
+    }
+
+    function renderResults(data) {
+      currentResults = data;
+      resultsContainer.style.display = 'block';
+
+      if (data.length === 0) {
+        resultsList.innerHTML = '<div class="empty-state">Kırık referans bulunamadı</div>';
+        return;
+      }
+
+      resultsList.innerHTML = data.map(item => `
+        <div class="result-item">
+          <div class="result-info">
+            <div class="result-node">${escapeHtml(item.nodeName)}</div>
+            <div class="result-field">${escapeHtml(item.field)}${item.variableName ? ' → ' + escapeHtml(item.variableName) : ''}</div>
+          </div>
+          <span class="result-status status-${item.status}">${getStatusLabel(item.status)}</span>
+        </div>
+      `).join('');
+
+      updateStats(data);
+    }
+
+    function getStatusLabel(status) {
+      switch (status) {
+        case 'broken': return 'Kırık';
+        case 'fixed': return 'Düzeltildi';
+        case 'no-match': return 'Eşleşmedi';
+        default: return status;
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+    }
+
+    function downloadJson(content, filename) {
+      const blob = new Blob([content], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    window.onmessage = (event) => {
+      const msg = event.data.pluginMessage;
+      if (!msg) return;
+
+      switch (msg.type) {
+        case 'status':
+          showStatus(msg.message);
+          break;
+
+        case 'scan-result':
+          setButtonsDisabled(false);
+          showStatus(`Tarama tamamlandı. ${msg.data.length} kırık referans bulundu.`, msg.data.length > 0 ? 'error' : 'success');
+          renderResults(msg.data);
+          break;
+
+        case 'fix-result':
+          setButtonsDisabled(false);
+          showStatus(`Düzeltme tamamlandı. ${msg.fixedCount} düzeltildi, ${msg.failedCount} eşleşmedi.`, msg.failedCount > 0 ? 'error' : 'success');
+          renderResults(msg.data);
+          break;
+
+        case 'export-result':
+          setButtonsDisabled(false);
+          showStatus('Token\'lar export edildi.', 'success');
+          downloadJson(msg.data, msg.fileName);
+          break;
+
+        case 'error':
+          setButtonsDisabled(false);
+          showStatus(msg.message, 'error');
+          break;
+      }
+    };
+  </script>
+</body>
+</html>
