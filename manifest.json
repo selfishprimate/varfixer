@@ -1,6 +1,6 @@
 {
-  "name": "VarFixer",
-  "id": "varfixer-plugin",
+  "name": "Token Connector",
+  "id": "token-connector-plugin",
   "api": "1.0.0",
   "main": "code.js",
   "ui": "ui.html",

@@ -205,7 +205,7 @@ async function scanNodesRecursively(nodes: readonly SceneNode[]): Promise<Broken
 
     // Her 20 node'da bir progress güncelle ve UI'ın nefes almasını sağla
     if (scannedNodes % 20 === 0) {
-      updateProgress(scannedNodes, totalNodesToScan, `Taranıyor: ${node.name.substring(0, 30)}...`);
+      updateProgress(scannedNodes, totalNodesToScan, `Scanning: ${node.name.substring(0, 30)}...`);
       // UI thread'inin güncellenmesi için kısa bekle
       await new Promise(resolve => setTimeout(resolve, 0));
     }
@@ -232,29 +232,29 @@ async function scanNodesRecursively(nodes: readonly SceneNode[]): Promise<Broken
   return allBroken;
 }
 
-// Aktif sayfayı tara
+// Scan current page
 async function scanCurrentPage(): Promise<void> {
   try {
-    // UI'a tarama başladığını bildir (listeyi temizle ve progress göster)
-    figma.ui.postMessage({ type: 'scan-start', message: 'Node\'lar sayılıyor...' });
+    // Notify UI that scan started (clear list and show progress)
+    figma.ui.postMessage({ type: 'scan-start', message: 'Counting nodes...' });
 
-    // Kısa gecikme ile UI'ın güncellenmesini sağla
+    // Short delay to let UI update
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Önce toplam node sayısını hesapla
+    // First calculate total node count
     totalNodesToScan = countNodes(figma.currentPage.children);
     scannedNodes = 0;
 
     console.log('Total nodes to scan:', totalNodesToScan);
-    updateProgress(0, totalNodesToScan, `${totalNodesToScan} node bulundu. Variable'lar indexleniyor...`);
+    updateProgress(0, totalNodesToScan, `${totalNodesToScan} nodes found. Indexing variables...`);
 
-    // UI güncellemesi için bekle
+    // Wait for UI update
     await new Promise(resolve => setTimeout(resolve, 10));
 
     localVariableMap = await buildLocalVariableMap();
     const varCount = localVariableMap.byFullPath.size;
 
-    updateProgress(0, totalNodesToScan, `${varCount} variable bulundu. Tarama başlıyor...`);
+    updateProgress(0, totalNodesToScan, `${varCount} variables found. Starting scan...`);
 
     brokenReferences = await scanNodesRecursively(figma.currentPage.children);
 
@@ -280,37 +280,37 @@ async function scanCurrentPage(): Promise<void> {
       collectionSamples: collectionSamples
     });
   } catch (error) {
-    figma.ui.postMessage({ type: 'error', message: `Tarama hatası: ${error}` });
+    figma.ui.postMessage({ type: 'error', message: `Scan error: ${error}` });
   }
 }
 
-// Tüm sayfaları tara
+// Scan all pages
 async function scanAllPages(): Promise<void> {
   try {
-    // UI'a tarama başladığını bildir (listeyi temizle ve progress göster)
-    figma.ui.postMessage({ type: 'scan-start', message: 'Hazırlanıyor...' });
+    // Notify UI that scan started (clear list and show progress)
+    figma.ui.postMessage({ type: 'scan-start', message: 'Preparing...' });
 
-    // Kısa gecikme ile UI'ın güncellenmesini sağla
+    // Short delay to let UI update
     await new Promise(resolve => setTimeout(resolve, 10));
 
-    // Tüm sayfalardaki toplam node sayısını hesapla
+    // Calculate total node count across all pages
     totalNodesToScan = 0;
     for (const page of figma.root.children) {
       totalNodesToScan += countNodes(page.children);
     }
     scannedNodes = 0;
 
-    updateProgress(0, totalNodesToScan, 'Variable\'lar indexleniyor...');
+    updateProgress(0, totalNodesToScan, 'Indexing variables...');
 
     localVariableMap = await buildLocalVariableMap();
     const varCount = localVariableMap.byFullPath.size;
     brokenReferences = [];
 
-    updateProgress(0, totalNodesToScan, `${varCount} variable bulundu. ${figma.root.children.length} sayfa taranacak...`);
+    updateProgress(0, totalNodesToScan, `${varCount} variables found. Scanning ${figma.root.children.length} pages...`);
 
     for (let i = 0; i < figma.root.children.length; i++) {
       const page = figma.root.children[i];
-      updateProgress(scannedNodes, totalNodesToScan, `Sayfa ${i + 1}/${figma.root.children.length}: ${page.name}`);
+      updateProgress(scannedNodes, totalNodesToScan, `Page ${i + 1}/${figma.root.children.length}: ${page.name}`);
       const pageBroken = await scanNodesRecursively(page.children);
       brokenReferences = brokenReferences.concat(pageBroken);
     }
@@ -323,7 +323,7 @@ async function scanAllPages(): Promise<void> {
       localVariableCount: varCount
     });
   } catch (error) {
-    figma.ui.postMessage({ type: 'error', message: `Tarama hatası: ${error}` });
+    figma.ui.postMessage({ type: 'error', message: `Scan error: ${error}` });
   }
 }
 
@@ -339,14 +339,14 @@ function countNodes(nodes: readonly SceneNode[]): number {
   return count;
 }
 
-// Kırık ve remote referansları düzelt
+// Fix broken and remote references
 async function fixBrokenReferences(): Promise<void> {
   console.log('=== FIX STARTED ===');
   console.log('localVariableMap exists:', !!localVariableMap);
   console.log('brokenReferences count:', brokenReferences.length);
 
   if (!localVariableMap) {
-    figma.ui.postMessage({ type: 'error', message: 'Önce tarama yapın' });
+    figma.ui.postMessage({ type: 'error', message: 'Please scan first' });
     return;
   }
 
@@ -355,13 +355,13 @@ async function fixBrokenReferences(): Promise<void> {
 
   const total = brokenReferences.filter(r => r.status === 'broken' || r.status === 'remote').length;
 
-  // UI'a düzeltme başladığını bildir ve progress bar'ı hemen göster
-  figma.ui.postMessage({ type: 'fix-start', total: total, message: 'Hazırlanıyor...' });
+  // Notify UI that fix started and show progress bar
+  figma.ui.postMessage({ type: 'fix-start', total: total, message: 'Preparing...' });
 
-  // Kısa gecikme ile UI'ın güncellenmesini sağla
+  // Short delay to let UI update
   await new Promise(resolve => setTimeout(resolve, 10));
 
-  updateProgress(0, total, 'Düzeltme başlıyor...');
+  updateProgress(0, total, 'Starting fix...');
 
   let fixedCount = 0;
   let failedCount = 0;
@@ -369,12 +369,12 @@ async function fixBrokenReferences(): Promise<void> {
 
   for (let i = 0; i < brokenReferences.length; i++) {
     const ref = brokenReferences[i];
-    // Hem kırık hem remote referansları düzelt
+    // Fix both broken and remote references
     if (ref.status !== 'broken' && ref.status !== 'remote') continue;
 
     processed++;
-    // Her item'da progress güncelle
-    updateProgress(processed, total, `Düzeltiliyor: ${ref.nodeName.substring(0, 30)}...`);
+    // Update progress for each item
+    updateProgress(processed, total, `Fixing: ${ref.nodeName.substring(0, 30)}...`);
 
     const node = await figma.getNodeByIdAsync(ref.nodeId) as SceneNode;
     if (!node) {
@@ -687,7 +687,7 @@ async function exportTokens(): Promise<void> {
       fileName: `${figma.root.name}-tokens-${new Date().toISOString().split('T')[0]}.json`
     });
   } catch (error) {
-    figma.ui.postMessage({ type: 'error', message: `Export hatası: ${error}` });
+    figma.ui.postMessage({ type: 'error', message: `Export error: ${error}` });
   }
 }
 

@@ -1,7 +1,7 @@
 {
-  "name": "varfixer",
+  "name": "token-connector",
   "version": "1.0.0",
-  "description": "Figma plugin to detect and fix broken variable references",
+  "description": "Figma plugin to detect and fix remote/broken variable references by connecting them to local variables",
   "scripts": {
     "build": "tsc",
     "watch": "tsc --watch"

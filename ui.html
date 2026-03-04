@@ -18,10 +18,17 @@
     }
 
     h1 {
-      font-size: 14px;
+      font-size: 18px;
       font-weight: 600;
-      margin-bottom: 12px;
+      margin-bottom: 6px;
       color: #000;
+    }
+
+    .description {
+      font-size: 13px;
+      color: #666;
+      margin-bottom: 14px;
+      line-height: 1.4;
     }
 
     .button-group {
@@ -38,10 +45,10 @@
 
     button {
       flex: 1;
-      padding: 8px 12px;
+      padding: 10px 16px;
       border: none;
       border-radius: 6px;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 500;
       cursor: pointer;
       transition: background 0.15s;
@@ -61,13 +68,14 @@
       background: #0B85E0;
     }
 
-    .btn-secondary {
-      background: #E5E5E5;
-      color: #333;
+    .btn-outline {
+      background: transparent;
+      color: #0D99FF;
+      border: 1.5px solid #0D99FF;
     }
 
-    .btn-secondary:hover:not(:disabled) {
-      background: #D5D5D5;
+    .btn-outline:hover:not(:disabled) {
+      background: rgba(13, 153, 255, 0.1);
     }
 
     .btn-success {
@@ -77,15 +85,6 @@
 
     .btn-success:hover:not(:disabled) {
       background: #0F9B4F;
-    }
-
-    .btn-export {
-      background: #7B61FF;
-      color: #fff;
-    }
-
-    .btn-export:hover:not(:disabled) {
-      background: #6B4FE0;
     }
 
     .status-bar {
@@ -245,16 +244,13 @@
   </style>
 </head>
 <body>
-  <h1>VarFixer</h1>
+  <h1>Token Connector</h1>
+  <p class="description">Detects remote and broken variable references and matches them with local variables.</p>
 
   <div class="button-group">
     <div class="button-row">
-      <button id="scan-btn" class="btn-primary">Sayfayı Tara</button>
-      <button id="scan-all-btn" class="btn-secondary">Tüm Sayfaları Tara</button>
-    </div>
-    <div class="button-row">
-      <button id="fix-btn" class="btn-success" disabled>Düzelt</button>
-      <button id="export-btn" class="btn-export">Token'ları Export Et</button>
+      <button id="scan-btn" class="btn-primary">Scan Page</button>
+      <button id="scan-all-btn" class="btn-outline">Scan All Pages</button>
     </div>
   </div>
 
@@ -262,7 +258,7 @@
 
   <div id="progress-container" class="progress-container">
     <div class="progress-header">
-      <span id="progress-label">Taranıyor...</span>
+      <span id="progress-label">Scanning...</span>
       <span id="progress-percent">0%</span>
     </div>
     <div class="progress-bar">
@@ -273,21 +269,25 @@
 
   <div id="stats" class="stats" style="display: none;">
     <div class="stat">Remote: <span id="remote-count" class="stat-value">0</span></div>
-    <div class="stat">Kırık: <span id="broken-count" class="stat-value">0</span></div>
-    <div class="stat">Düzeltildi: <span id="fixed-count" class="stat-value">0</span></div>
-    <div class="stat">Eşleşmedi: <span id="no-match-count" class="stat-value">0</span></div>
+    <div class="stat">Broken: <span id="broken-count" class="stat-value">0</span></div>
+    <div class="stat">Fixed: <span id="fixed-count" class="stat-value">0</span></div>
+    <div class="stat">No Match: <span id="no-match-count" class="stat-value">0</span></div>
   </div>
 
   <div id="results-container" class="results-container" style="display: none;">
-    <div class="results-header">Sonuçlar</div>
+    <div class="results-header">Results</div>
     <div id="results-list"></div>
+  </div>
+
+  <div id="fix-container" style="display: none; margin-top: 12px;">
+    <button id="fix-btn" class="btn-success" style="width: 100%;">Fix All</button>
   </div>
 
   <script>
     const scanBtn = document.getElementById('scan-btn');
     const scanAllBtn = document.getElementById('scan-all-btn');
     const fixBtn = document.getElementById('fix-btn');
-    const exportBtn = document.getElementById('export-btn');
+    const fixContainer = document.getElementById('fix-container');
     const statusBar = document.getElementById('status-bar');
     const statsDiv = document.getElementById('stats');
     const resultsContainer = document.getElementById('results-container');
@@ -319,18 +319,10 @@
       setButtonsDisabled(true);
     };
 
-    exportBtn.onclick = () => {
-      parent.postMessage({ pluginMessage: { type: 'export-tokens' } }, '*');
-      setButtonsDisabled(true);
-    };
-
     function setButtonsDisabled(disabled) {
       scanBtn.disabled = disabled;
       scanAllBtn.disabled = disabled;
-      exportBtn.disabled = disabled;
-      if (disabled) {
-        fixBtn.disabled = true;
-      }
+      fixBtn.disabled = disabled;
     }
 
     function showStatus(message, type = 'info') {
@@ -365,7 +357,7 @@
       noMatchCount.textContent = noMatch;
       statsDiv.style.display = 'flex';
 
-      // Düzelt butonu kırık veya remote referans varsa aktif
+      // Enable fix button if there are broken or remote references
       fixBtn.disabled = (broken === 0 && remote === 0);
     }
 
@@ -374,7 +366,7 @@
       resultsContainer.style.display = 'block';
 
       if (data.length === 0) {
-        resultsList.innerHTML = '<div class="empty-state">Kırık referans bulunamadı</div>';
+        resultsList.innerHTML = '<div class="empty-state">No broken references found</div>';
         return;
       }
 
@@ -394,9 +386,9 @@
     function getStatusLabel(status) {
       switch (status) {
         case 'remote': return 'Remote';
-        case 'broken': return 'Kırık';
-        case 'fixed': return 'Düzeltildi';
-        case 'no-match': return 'Eşleşmedi';
+        case 'broken': return 'Broken';
+        case 'fixed': return 'Fixed';
+        case 'no-match': return 'No Match';
         default: return status;
       }
     }
@@ -407,18 +399,6 @@
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;');
-    }
-
-    function downloadJson(content, filename) {
-      const blob = new Blob([content], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     }
 
     window.onmessage = (event) => {
@@ -435,7 +415,7 @@
           break;
 
         case 'scan-start':
-          // Tarama başladı - listeyi temizle ve progress göster
+          // Scan started - clear list and show progress
           currentResults = [];
           resultsList.innerHTML = '';
           resultsContainer.style.display = 'block';
@@ -445,16 +425,17 @@
           fixedCount.textContent = '0';
           noMatchCount.textContent = '0';
           statusBar.style.display = 'none';
-          // Progress bar'ı hemen göster
+          fixContainer.style.display = 'none';
+          // Show progress bar immediately
           progressContainer.style.display = 'block';
-          progressLabel.textContent = 'Hazırlanıyor...';
+          progressLabel.textContent = 'Preparing...';
           progressPercent.textContent = '';
           progressFill.style.width = '0%';
           progressMessage.textContent = msg.message || '';
           break;
 
         case 'scan-item':
-          // Streaming: Bulunan her item'ı anında listeye ekle
+          // Streaming: Add each found item to list immediately
           currentResults.push(msg.item);
           const itemHtml = `
             <div class="result-item" data-index="${currentResults.length - 1}">
@@ -473,17 +454,17 @@
           break;
 
         case 'fix-start':
-          // Düzeltme başladı - progress bar'ı hemen göster
+          // Fix started - show progress bar immediately
           progressContainer.style.display = 'block';
           statusBar.style.display = 'none';
-          progressLabel.textContent = msg.total + ' referans düzeltilecek';
+          progressLabel.textContent = msg.total + ' references to fix';
           progressPercent.textContent = '0%';
           progressFill.style.width = '0%';
-          progressMessage.textContent = msg.message || 'Hazırlanıyor...';
+          progressMessage.textContent = msg.message || 'Preparing...';
           break;
 
         case 'fix-item':
-          // Streaming: Her düzeltilen item'ı güncelle
+          // Streaming: Update each fixed item
           if (currentResults[msg.index]) {
             currentResults[msg.index].status = msg.status;
             const itemEl = resultsList.querySelector(`[data-index="${msg.index}"]`);
@@ -493,13 +474,13 @@
                 statusEl.className = 'result-status status-' + msg.status;
                 statusEl.textContent = getStatusLabel(msg.status);
               }
-              // Düzeltildi ise görünür alana scroll et
+              // Scroll to fixed item
               if (msg.status === 'fixed') {
                 itemEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
               }
             }
           }
-          // Stats güncelle
+          // Update stats
           updateStats(currentResults);
           break;
 
@@ -509,30 +490,33 @@
           const remoteRefs = msg.data.filter(r => r.status === 'remote').length;
           const brokenRefs = msg.data.filter(r => r.status === 'broken').length;
           const totalIssues = remoteRefs + brokenRefs;
-          let statusMsg = `Tarama tamamlandı. ${msg.localVariableCount} local variable bulundu. `;
+          let statusMsg = `Scan complete. ${msg.localVariableCount} local variables found. `;
           if (totalIssues === 0) {
-            statusMsg += 'Sorun bulunamadı.';
+            statusMsg += 'No issues found.';
+            fixContainer.style.display = 'none';
           } else {
             if (remoteRefs > 0) statusMsg += `${remoteRefs} remote`;
             if (remoteRefs > 0 && brokenRefs > 0) statusMsg += ', ';
-            if (brokenRefs > 0) statusMsg += `${brokenRefs} kırık`;
-            statusMsg += ' referans bulundu.';
+            if (brokenRefs > 0) statusMsg += `${brokenRefs} broken`;
+            statusMsg += ' references found.';
+            // Show fix button
+            fixContainer.style.display = 'block';
           }
           showStatus(statusMsg, totalIssues > 0 ? 'error' : 'success');
           renderResults(msg.data);
 
-          // Debug: Collection bazlı variable örneklerini konsola yaz
+          // Debug: Log collection samples
           if (msg.collectionSamples) {
             console.log('=== LOCAL COLLECTIONS ===');
             Object.keys(msg.collectionSamples).forEach(function(col) {
-              console.log('Collection: ' + col + ' (' + msg.collectionSamples[col].length + ' örnek)');
+              console.log('Collection: ' + col + ' (' + msg.collectionSamples[col].length + ' samples)');
               msg.collectionSamples[col].forEach(function(v) { console.log('  ' + v); });
             });
           }
-          // Debug: Eşleşmeyen referansların detaylı bilgisini konsola yaz
+          // Debug: Log unmatched variable details
           const noMatchRefs = msg.data.filter(r => r.status === 'remote' || r.status === 'broken' || r.status === 'no-match');
           if (noMatchRefs.length > 0) {
-            console.log('=== ARANAN VARIABLE DETAYLARI ===');
+            console.log('=== SEARCHED VARIABLE DETAILS ===');
             const uniqueRefs = {};
             noMatchRefs.forEach(function(r) {
               const key = (r.collectionName || '?') + '/' + (r.variableName || '?');
@@ -552,15 +536,13 @@
           break;
 
         case 'fix-result':
+          hideProgress();
           setButtonsDisabled(false);
-          showStatus(`Düzeltme tamamlandı. ${msg.fixedCount} düzeltildi, ${msg.failedCount} eşleşmedi.`, msg.failedCount > 0 ? 'error' : 'success');
+          showStatus(`Fix complete. ${msg.fixedCount} fixed, ${msg.failedCount} unmatched.`, msg.failedCount > 0 ? 'error' : 'success');
           renderResults(msg.data);
-          break;
-
-        case 'export-result':
-          setButtonsDisabled(false);
-          showStatus('Token\'lar export edildi.', 'success');
-          downloadJson(msg.data, msg.fileName);
+          // Show button if there are remaining issues, hide otherwise
+          const remainingIssues = msg.data.filter(r => r.status === 'remote' || r.status === 'broken').length;
+          fixContainer.style.display = remainingIssues > 0 ? 'block' : 'none';
           break;
 
         case 'error':
